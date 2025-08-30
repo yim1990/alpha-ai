@@ -22,43 +22,55 @@ class Base(DeclarativeBase):
     pass
 
 
-# 비동기 엔진 생성
-async_engine = create_async_engine(
-    settings.supabase_db_url.replace("postgresql", "postgresql+asyncpg"),
-    echo=settings.debug,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,  # 연결 상태 확인
-    pool_recycle=3600,  # 1시간마다 연결 재생성
-)
+# 비동기 엔진 생성 (환경 변수가 있을 때만)
+async_engine = None
+sync_engine = None
 
-# 동기 엔진 생성 (마이그레이션용)
-sync_engine = create_engine(
-    settings.supabase_db_url,
-    echo=settings.debug,
-    pool_size=10,
-    max_overflow=5,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-)
+try:
+    if settings.supabase_db_url and "postgresql" in settings.supabase_db_url:
+        async_engine = create_async_engine(
+            settings.supabase_db_url.replace("postgresql", "postgresql+asyncpg"),
+            echo=settings.debug,
+            pool_size=20,
+            max_overflow=10,
+            pool_pre_ping=True,  # 연결 상태 확인
+            pool_recycle=3600,  # 1시간마다 연결 재생성
+        )
+
+        # 동기 엔진 생성 (마이그레이션용)
+        sync_engine = create_engine(
+            settings.supabase_db_url,
+            echo=settings.debug,
+            pool_size=10,
+            max_overflow=5,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+except Exception as e:
+    logger.warning(f"Database engine creation failed: {e}. Running without database.")
 
 # 비동기 세션 팩토리
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+AsyncSessionLocal = None
+SyncSessionLocal = None
 
-# 동기 세션 팩토리 (Celery 워커용)
-SyncSessionLocal = sessionmaker(
-    bind=sync_engine,
-    class_=Session,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+if async_engine:
+    AsyncSessionLocal = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+if sync_engine:
+    # 동기 세션 팩토리 (Celery 워커용)
+    SyncSessionLocal = sessionmaker(
+        bind=sync_engine,
+        class_=Session,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
 
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
@@ -68,6 +80,9 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession: 비동기 데이터베이스 세션
     """
+    if not AsyncSessionLocal:
+        raise RuntimeError("Database not initialized")
+        
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -87,6 +102,9 @@ def get_sync_db() -> Session:
     Returns:
         Session: 동기 데이터베이스 세션
     """
+    if not SyncSessionLocal:
+        raise RuntimeError("Database not initialized")
+        
     session = SyncSessionLocal()
     try:
         return session
@@ -106,6 +124,9 @@ async def async_db_context() -> AsyncGenerator[AsyncSession, None]:
         async with async_db_context() as db:
             result = await db.execute(query)
     """
+    if not AsyncSessionLocal:
+        raise RuntimeError("Database not initialized")
+        
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -123,6 +144,10 @@ async def init_db() -> None:
     데이터베이스 초기화
     테이블 생성 및 초기 데이터 설정
     """
+    if not async_engine:
+        logger.warning("Database engine not available, skipping initialization")
+        return
+        
     try:
         async with async_engine.begin() as conn:
             # 테이블 생성 (개발 환경에서만)
@@ -136,5 +161,8 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     """데이터베이스 연결 종료"""
-    await async_engine.dispose()
-    logger.info("Database connections closed")
+    if async_engine:
+        await async_engine.dispose()
+        logger.info("Database connections closed")
+    else:
+        logger.info("No database connections to close")

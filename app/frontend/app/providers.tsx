@@ -12,10 +12,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 60 * 1000, // 1분
+            staleTime: 2 * 1000, // 2초 (실시간 데이터용)
             gcTime: 5 * 60 * 1000, // 5분 (이전 cacheTime)
+            retry: 2, // KIS API 재시도
+            refetchOnWindowFocus: true, // 포커스 시 데이터 새로고침
+            refetchOnReconnect: true, // 재연결 시 데이터 새로고침
+          },
+          mutations: {
             retry: 1,
-            refetchOnWindowFocus: false,
           },
         },
       })

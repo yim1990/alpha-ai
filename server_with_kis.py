@@ -333,16 +333,16 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     print("🚀 KIS API 통합 서버 시작...")
-    print("📍 서버 주소: http://localhost:8001")
-    print("📖 API 문서: http://localhost:8001/api/docs")
-    print("💊 헬스체크: http://localhost:8001/health")
-    print("📊 KIS 상태: http://localhost:8001/api/kis/status")
+    print("📍 서버 주소: http://localhost:8000")
+    print("📖 API 문서: http://localhost:8000/docs")
+    print("💊 헬스체크: http://localhost:8000/health")
+    print("📊 KIS 상태: http://localhost:8000/api/kis/status")
     print("=" * 50)
     
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8001,  # 기존 테스트 서버와 구분하기 위해 다른 포트 사용
+        port=8000,  # 백엔드 API 서버 포트
         reload=False,  # KIS 연결 때문에 reload 비활성화
         log_level="info"
     )

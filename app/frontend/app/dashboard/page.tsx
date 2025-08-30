@@ -9,73 +9,123 @@ import {
   CheckCircle,
   Clock,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  RefreshCw
 } from 'lucide-react';
 
+import RealTimeStockCard from '@/components/RealTimeStockCard';
+import KISStatusCard from '@/components/KISStatusCard';
+import { 
+  useDashboardStats, 
+  useOverallStatus, 
+  useMainStocks,
+  formatPrice,
+  formatPercent,
+  getChangeColor 
+} from '@/lib/hooks/useApi';
+
 export default function DashboardPage() {
-  // 임시 데이터 (실제로는 API에서 가져옴)
-  const stats = {
-    totalBalance: 125000.50,
-    dailyPnL: 2340.20,
-    dailyPnLPercent: 1.92,
-    openPositions: 8,
-    pendingOrders: 3,
-    accountHealth: 'healthy'
-  };
+  // 실시간 데이터 훅 사용
+  const { data: dashboardStats, isLoading: statsLoading, isFetching: statsFetching } = useDashboardStats();
+  const { isLoading: overallLoading, hasData } = useOverallStatus();
+  const mainStocksQueries = useMainStocks();
 
-  const recentOrders = [
-    { id: '1', symbol: 'AAPL', side: 'BUY', qty: 10, price: 175.50, status: 'filled', time: '10:30' },
-    { id: '2', symbol: 'MSFT', side: 'SELL', qty: 5, price: 380.20, status: 'filled', time: '10:15' },
-    { id: '3', symbol: 'GOOGL', side: 'BUY', qty: 3, price: 140.80, status: 'pending', time: '10:00' },
-  ];
-
-  const positions = [
-    { symbol: 'AAPL', qty: 50, avgPrice: 170.20, currentPrice: 175.50, pnl: 265.00, pnlPercent: 3.11 },
-    { symbol: 'TSLA', qty: 20, avgPrice: 245.50, currentPrice: 238.90, pnl: -132.00, pnlPercent: -2.69 },
-    { symbol: 'NVDA', qty: 15, avgPrice: 450.00, currentPrice: 468.50, pnl: 277.50, pnlPercent: 4.11 },
-  ];
+  // 로딩 상태
+  if (overallLoading && !hasData) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
+          <RefreshCw className="h-5 w-5 animate-spin text-gray-400" />
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="card card-body animate-pulse">
+              <div className="h-4 bg-gray-200 rounded mb-2"></div>
+              <div className="h-8 bg-gray-200 rounded mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* 페이지 헤더 */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
-        <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-500">마지막 업데이트:</span>
-          <span className="text-sm font-medium">2024-03-15 14:30:25</span>
+        <h1 className="text-2xl font-bold text-gray-900">실시간 대시보드</h1>
+        <div className="flex items-center space-x-3">
+          {statsFetching && <RefreshCw className="h-4 w-4 animate-spin text-primary-500" />}
+          <div className="text-right">
+            <div className="text-sm text-gray-500">데이터 소스</div>
+            <div className="text-sm font-medium text-primary-600">
+              {(dashboardStats as any)?.data_source || 'KIS API'}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-gray-500">마지막 업데이트</div>
+            <div className="text-sm font-medium">
+              {new Date().toLocaleTimeString('ko-KR')}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* KIS API 상태 */}
+      <KISStatusCard />
 
       {/* 통계 카드 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="총 자산"
-          value={`$${stats.totalBalance.toLocaleString()}`}
+          value={formatPrice((dashboardStats as any)?.total_balance)}
           icon={<DollarSign className="h-5 w-5" />}
           trend="neutral"
+          isLoading={statsLoading}
         />
         <StatCard
           title="일일 손익"
-          value={`$${stats.dailyPnL.toLocaleString()}`}
-          subValue={`${stats.dailyPnLPercent > 0 ? '+' : ''}${stats.dailyPnLPercent}%`}
-          icon={stats.dailyPnL >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-          trend={stats.dailyPnL >= 0 ? 'up' : 'down'}
+          value={formatPrice((dashboardStats as any)?.daily_pnl)}
+          subValue={formatPercent((dashboardStats as any)?.daily_pnl_percent)}
+          icon={(dashboardStats as any) && (dashboardStats as any).daily_pnl >= 0 ? 
+            <TrendingUp className="h-5 w-5" /> : 
+            <TrendingDown className="h-5 w-5" />
+          }
+          trend={(dashboardStats as any) && (dashboardStats as any).daily_pnl >= 0 ? 'up' : 'down'}
+          isLoading={statsLoading}
         />
         <StatCard
           title="오픈 포지션"
-          value={stats.openPositions.toString()}
+          value={(dashboardStats as any)?.open_positions?.toString() || '0'}
           icon={<Activity className="h-5 w-5" />}
           trend="neutral"
+          isLoading={statsLoading}
         />
         <StatCard
-          title="계좌 상태"
-          value={stats.accountHealth === 'healthy' ? '정상' : '점검필요'}
-          icon={stats.accountHealth === 'healthy' ? 
+          title="KIS 연결"
+          value={(dashboardStats as any)?.kis_connected ? 'KIS 연결됨' : 'KIS 연결 안됨'}
+          icon={(dashboardStats as any)?.kis_connected ? 
             <CheckCircle className="h-5 w-5" /> : 
             <AlertCircle className="h-5 w-5" />
           }
-          trend={stats.accountHealth === 'healthy' ? 'up' : 'down'}
+          trend={(dashboardStats as any)?.kis_connected ? 'up' : 'down'}
+          isLoading={statsLoading}
         />
+      </div>
+
+      {/* 실시간 주식 시세 */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4">실시간 주식 시세</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <RealTimeStockCard symbol="AAPL" />
+          <RealTimeStockCard symbol="TSLA" />
+          <RealTimeStockCard symbol="NVDA" />
+          <RealTimeStockCard symbol="MSFT" />
+          <RealTimeStockCard symbol="GOOGL" />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -99,27 +149,13 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentOrders.map((order) => (
-                  <tr key={order.id}>
-                    <td className="font-medium">{order.symbol}</td>
-                    <td>
-                      <span className={`badge ${order.side === 'BUY' ? 'badge-success' : 'badge-danger'}`}>
-                        {order.side}
-                      </span>
-                    </td>
-                    <td>{order.qty}</td>
-                    <td>${order.price}</td>
-                    <td>
-                      <span className={`badge ${
-                        order.status === 'filled' ? 'badge-success' : 
-                        order.status === 'pending' ? 'badge-warning' : 
-                        'badge-info'
-                      }`}>
-                        {order.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td colSpan={5} className="text-center py-8 text-gray-500">
+                    <Activity className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                    <p>주문 데이터를 불러오는 중입니다...</p>
+                    <p className="text-sm">실제 주문 기능 구현 시 데이터가 표시됩니다.</p>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -145,28 +181,13 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {positions.map((position) => (
-                  <tr key={position.symbol}>
-                    <td className="font-medium">{position.symbol}</td>
-                    <td>{position.qty}</td>
-                    <td>${position.avgPrice}</td>
-                    <td>${position.currentPrice}</td>
-                    <td>
-                      <div className={`flex items-center ${position.pnl >= 0 ? 'text-success-600' : 'text-danger-600'}`}>
-                        {position.pnl >= 0 ? 
-                          <ArrowUpRight className="h-4 w-4 mr-1" /> : 
-                          <ArrowDownRight className="h-4 w-4 mr-1" />
-                        }
-                        <span className="font-medium">
-                          ${Math.abs(position.pnl).toFixed(2)}
-                        </span>
-                        <span className="ml-1 text-sm">
-                          ({position.pnlPercent > 0 ? '+' : ''}{position.pnlPercent}%)
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td colSpan={5} className="text-center py-8 text-gray-500">
+                    <TrendingUp className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                    <p>포지션 데이터를 불러오는 중입니다...</p>
+                    <p className="text-sm">실제 계좌 연동 시 데이터가 표시됩니다.</p>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -197,13 +218,15 @@ function StatCard({
   value, 
   subValue,
   icon, 
-  trend 
+  trend,
+  isLoading = false
 }: { 
   title: string;
-  value: string;
+  value: string | null | undefined;
   subValue?: string;
   icon: React.ReactNode;
   trend: 'up' | 'down' | 'neutral';
+  isLoading?: boolean;
 }) {
   const trendColors = {
     up: 'text-success-600 bg-success-50',
@@ -211,8 +234,23 @@ function StatCard({
     neutral: 'text-gray-600 bg-gray-50'
   };
 
+  if (isLoading) {
+    return (
+      <div className="card card-body animate-pulse">
+        <div className="flex items-center justify-between mb-2">
+          <div className="h-4 bg-gray-200 rounded w-20"></div>
+          <div className="h-8 w-8 bg-gray-200 rounded-lg"></div>
+        </div>
+        <div className="flex items-baseline">
+          <div className="h-8 bg-gray-200 rounded w-24"></div>
+          <div className="h-4 bg-gray-200 rounded w-12 ml-2"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="card card-body">
+    <div className="card card-body hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-gray-600">{title}</span>
         <div className={`p-2 rounded-lg ${trendColors[trend]}`}>
@@ -220,7 +258,9 @@ function StatCard({
         </div>
       </div>
       <div className="flex items-baseline">
-        <span className="text-2xl font-bold text-gray-900">{value}</span>
+        <span className="text-2xl font-bold text-gray-900">
+          {value || 'N/A'}
+        </span>
         {subValue && (
           <span className={`ml-2 text-sm font-medium ${
             trend === 'up' ? 'text-success-600' : 

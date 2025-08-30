@@ -1,0 +1,155 @@
+version: '3.9'
+
+services:
+  # Redis - 캐시 및 Celery 브로커
+  redis:
+    image: redis:7-alpine
+    container_name: alpha-ai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - alpha-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # PostgreSQL (로컬 개발용, 프로덕션은 Supabase 사용)
+  postgres:
+    image: postgres:15-alpine
+    container_name: alpha-ai-postgres
+    environment:
+      POSTGRES_USER: alpha_user
+      POSTGRES_PASSWORD: alpha_password
+      POSTGRES_DB: alpha_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - alpha-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alpha_user -d alpha_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: ./infra/Dockerfile.backend
+    container_name: alpha-ai-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SUPABASE_DB_URL=postgresql+psycopg://alpha_user:alpha_password@postgres:5432/alpha_db
+    volumes:
+      - ./app/backend:/app/backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - alpha-network
+    command: uvicorn app.backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: .
+      dockerfile: ./infra/Dockerfile.backend
+    container_name: alpha-ai-celery-worker
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SUPABASE_DB_URL=postgresql+psycopg://alpha_user:alpha_password@postgres:5432/alpha_db
+    volumes:
+      - ./app/backend:/app/backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - alpha-network
+    command: celery -A app.backend.celery_app worker --loglevel=info --concurrency=2 -Q bot,scheduler,market_data
+
+  # Celery Beat (스케줄러)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: ./infra/Dockerfile.backend
+    container_name: alpha-ai-celery-beat
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SUPABASE_DB_URL=postgresql+psycopg://alpha_user:alpha_password@postgres:5432/alpha_db
+    volumes:
+      - ./app/backend:/app/backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - alpha-network
+    command: celery -A app.backend.celery_app beat --loglevel=info
+
+  # Flower (Celery 모니터링)
+  flower:
+    build:
+      context: .
+      dockerfile: ./infra/Dockerfile.backend
+    container_name: alpha-ai-flower
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - alpha-network
+    command: celery -A app.backend.celery_app flower --port=5555
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: .
+      dockerfile: ./infra/Dockerfile.frontend
+    container_name: alpha-ai-frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    volumes:
+      - ./app/frontend:/app/frontend
+      - /app/frontend/node_modules
+      - /app/frontend/.next
+    depends_on:
+      - backend
+    networks:
+      - alpha-network
+    command: npm run dev
+
+networks:
+  alpha-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  postgres_data:

@@ -15,7 +15,9 @@ import {
   X
 } from 'lucide-react';
 import { useState } from 'react';
-import { signOut } from 'next-auth/react';
+
+import UserMenu from '@/components/UserMenu';
+import { useRequireAuth } from '@/lib/hooks/useAuth';
 
 const navigation = [
   { name: '대시보드', href: '/dashboard', icon: Home },
@@ -33,6 +35,21 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // 로그인 필요한 페이지로 인증 체크
+  const { user, isLoading } = useRequireAuth('viewer');
+  
+  // 로딩 중일 때 스피너 표시
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="spinner mb-4"></div>
+          <p className="text-gray-600">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -40,7 +57,7 @@ export default function DashboardLayout({
       <div className="lg:hidden fixed top-4 left-4 z-50">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-2 rounded-md bg-white shadow-md"
+          className="p-2 rounded-md bg-white shadow-lg border border-gray-200"
         >
           {sidebarOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
@@ -52,7 +69,7 @@ export default function DashboardLayout({
           fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200
           transform transition-transform duration-200 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:translate-x-0 lg:static lg:inset-0
+          lg:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
@@ -88,32 +105,16 @@ export default function DashboardLayout({
             })}
           </nav>
 
-          {/* 사용자 정보 */}
+          {/* 사용자 메뉴 */}
           <div className="border-t border-gray-200 p-4">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
-                  <span className="text-primary-700 font-semibold">JI</span>
-                </div>
-              </div>
-              <div className="ml-3 flex-1">
-                <p className="text-sm font-medium text-gray-700">Jason Im</p>
-                <p className="text-xs text-gray-500">관리자</p>
-              </div>
-              <button
-                onClick={() => signOut()}
-                className="ml-auto p-2 text-gray-400 hover:text-gray-600"
-              >
-                <LogOut className="h-5 w-5" />
-              </button>
-            </div>
+            <UserMenu />
           </div>
         </div>
       </aside>
 
       {/* 메인 컨텐츠 */}
-      <main className="lg:ml-64">
-        <div className="px-4 sm:px-6 lg:px-8 py-8">
+      <main className="lg:ml-64 min-h-screen">
+        <div className="px-4 sm:px-6 lg:px-8 py-8 pt-16 lg:pt-8">
           {children}
         </div>
       </main>

@@ -53,19 +53,26 @@ export interface HealthStatus {
 
 export interface KISStatus {
   connected: boolean;
-  last_token_time: string | null;
+  sandbox_mode: boolean;
   token_valid: boolean;
-  api_calls_today: number;
-  error_message: string | null;
+  last_check: string;
+  rate_limit: {
+    remaining: number;
+    total: number;
+    reset_at: string;
+  };
 }
 
 export interface MarketData {
   symbol: string;
-  current_price: number | null;
-  previous_close: number | null;
-  change_percent: number | null;
-  volume: number | null;
-  last_updated: string | null;
+  name: string;
+  price: number;
+  change: number;
+  change_percent: number;
+  volume: number;
+  market_cap: string;
+  timestamp: string;
+  source: string;
 }
 
 export interface AccountInfo {
@@ -80,15 +87,15 @@ export interface AccountInfo {
 }
 
 export interface DashboardStats {
-  total_balance: number;
+  total_accounts: number;
+  active_accounts: number;
+  total_rules: number;
+  active_rules: number;
+  total_positions: number;
+  total_value_usd: number;
   daily_pnl: number;
   daily_pnl_percent: number;
-  open_positions: number;
-  pending_orders: number;
-  account_health: string;
-  kis_connected: boolean;
-  data_source: string;
-  last_updated?: string;
+  last_updated: string;
 }
 
 export interface SystemStatus {
@@ -98,6 +105,56 @@ export interface SystemStatus {
   trading_bot: string;
   data_sync: string;
   last_update: string;
+}
+
+// 인증 관련 인터페이스
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'trader' | 'viewer';
+  is_active: boolean;
+  is_verified: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface UserCreate {
+  email: string;
+  password: string;
+  name: string;
+  role?: 'admin' | 'trader' | 'viewer';
+}
+
+export interface UserLogin {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  user: User;
+  token: {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+  };
+}
+
+export interface PasswordChange {
+  current_password: string;
+  new_password: string;
+}
+
+export interface PasswordStrengthResult {
+  valid: boolean;
+  score: number;
+  errors: string[];
+}
+
+export interface ApiResponse {
+  success: boolean;
+  message: string;
+  data?: any;
 }
 
 // API 함수들
@@ -142,6 +199,98 @@ export const api = {
   async getSystemStatus(): Promise<SystemStatus> {
     const response = await apiClient.get<SystemStatus>('/api/system/status');
     return response.data;
+  },
+
+  // 인증 관련 API
+  auth: {
+    // 회원가입
+    async register(userData: UserCreate): Promise<User> {
+      const response = await apiClient.post<User>('/api/auth/register', userData);
+      return response.data;
+    },
+
+    // 로그인
+    async login(loginData: UserLogin): Promise<LoginResponse> {
+      const response = await apiClient.post<LoginResponse>('/api/auth/login', loginData);
+      
+      // 로그인 성공 시 토큰을 axios 헤더에 설정
+      if (response.data.token.access_token) {
+        apiClient.defaults.headers.common['Authorization'] = 
+          `Bearer ${response.data.token.access_token}`;
+        
+        // 로컬 스토리지에 토큰 저장
+        localStorage.setItem('access_token', response.data.token.access_token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      
+      return response.data;
+    },
+
+    // 로그아웃
+    async logout(): Promise<ApiResponse> {
+      try {
+        const response = await apiClient.post<ApiResponse>('/api/auth/logout');
+        
+        // 토큰 및 사용자 정보 삭제
+        delete apiClient.defaults.headers.common['Authorization'];
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('user');
+        
+        return response.data;
+      } catch (error) {
+        // 오류가 발생해도 로컬 데이터는 정리
+        delete apiClient.defaults.headers.common['Authorization'];
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('user');
+        throw error;
+      }
+    },
+
+    // 현재 사용자 정보
+    async getCurrentUser(): Promise<User> {
+      const response = await apiClient.get<User>('/api/auth/me');
+      return response.data;
+    },
+
+    // 비밀번호 변경
+    async changePassword(passwordData: PasswordChange): Promise<ApiResponse> {
+      const response = await apiClient.post<ApiResponse>('/api/auth/change-password', passwordData);
+      return response.data;
+    },
+
+    // 비밀번호 강도 확인
+    async checkPasswordStrength(password: string): Promise<PasswordStrengthResult> {
+      const response = await apiClient.post<PasswordStrengthResult>(
+        '/api/auth/check-password-strength', 
+        { password }
+      );
+      return response.data;
+    },
+
+    // 토큰 검증
+    async verifyToken(): Promise<User> {
+      const response = await apiClient.get<User>('/api/auth/verify-token');
+      return response.data;
+    },
+
+    // 토큰 초기화 (페이지 로드 시)
+    initializeAuth(): void {
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      }
+    },
+
+    // 인증 상태 확인
+    isAuthenticated(): boolean {
+      return !!localStorage.getItem('access_token');
+    },
+
+    // 저장된 사용자 정보 가져오기
+    getStoredUser(): User | null {
+      const userStr = localStorage.getItem('user');
+      return userStr ? JSON.parse(userStr) : null;
+    },
   },
 };
 

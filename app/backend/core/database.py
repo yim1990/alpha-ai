@@ -11,9 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.backend.core.config import settings
-from app.backend.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 # SQLAlchemy Base 클래스
@@ -27,9 +24,12 @@ async_engine = None
 sync_engine = None
 
 try:
-    if settings.supabase_db_url and "postgresql" in settings.supabase_db_url:
+    database_url = settings.database_url
+    if database_url and "postgresql" in database_url:
+        print(f"🔗 데이터베이스 URL 생성됨: {database_url[:50]}...")
+        
         async_engine = create_async_engine(
-            settings.supabase_db_url.replace("postgresql", "postgresql+asyncpg"),
+            database_url,
             echo=settings.debug,
             pool_size=20,
             max_overflow=10,
@@ -37,9 +37,10 @@ try:
             pool_recycle=3600,  # 1시간마다 연결 재생성
         )
 
-        # 동기 엔진 생성 (마이그레이션용)
+        # 동기 엔진 생성 (마이그레이션용) - asyncpg를 psycopg2로 변경
+        sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
         sync_engine = create_engine(
-            settings.supabase_db_url,
+            sync_url,
             echo=settings.debug,
             pool_size=10,
             max_overflow=5,
@@ -47,7 +48,7 @@ try:
             pool_recycle=3600,
         )
 except Exception as e:
-    logger.warning(f"Database engine creation failed: {e}. Running without database.")
+    print(f"⚠️ Database engine creation failed: {e}. Running without database.")
 
 # 비동기 세션 팩토리
 AsyncSessionLocal = None
@@ -89,7 +90,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
             await session.commit()
         except Exception as e:
             await session.rollback()
-            logger.error(f"Database session error: {e}")
+            print(f"❌ Database session error: {e}")
             raise
         finally:
             await session.close()
@@ -111,7 +112,7 @@ def get_sync_db() -> Session:
     except Exception as e:
         session.rollback()
         session.close()
-        logger.error(f"Database session error: {e}")
+        print(f"❌ Database session error: {e}")
         raise
 
 
@@ -133,36 +134,58 @@ async def async_db_context() -> AsyncGenerator[AsyncSession, None]:
             await session.commit()
         except Exception as e:
             await session.rollback()
-            logger.error(f"Database transaction error: {e}")
+            print(f"❌ Database transaction error: {e}")
             raise
         finally:
             await session.close()
 
 
-async def init_db() -> None:
+async def check_db_connection() -> bool:
     """
-    데이터베이스 초기화
-    테이블 생성 및 초기 데이터 설정
+    데이터베이스 연결 상태를 확인합니다.
+    
+    Returns:
+        연결 성공 시 True, 실패 시 False
     """
     if not async_engine:
-        logger.warning("Database engine not available, skipping initialization")
-        return
+        print("❌ Database engine not configured")
+        return False
         
     try:
         async with async_engine.begin() as conn:
-            # 테이블 생성 (개발 환경에서만)
-            if settings.environment == "development":
-                await conn.run_sync(Base.metadata.create_all)
-                logger.info("Database tables created successfully")
+            # 간단한 쿼리로 연결 테스트
+            from sqlalchemy import text
+            result = await conn.execute(text("SELECT 1"))
+            result.scalar()
+            print("✅ Database connection successful")
+            return True
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
+        print(f"❌ Database connection failed: {e}")
+        return False
+
+
+async def init_db() -> None:
+    """
+    데이터베이스 연결 확인
+    서버 시작 시 데이터베이스 연결 상태만 확인합니다.
+    """
+    if not async_engine:
+        print("❌ Database engine not available")
+        return
+    
+    # 데이터베이스 연결 상태 확인
+    connection_ok = await check_db_connection()
+    if not connection_ok:
+        print("❌ Database connection verification failed")
+        return
+        
+    print("✅ Database connection verified")
 
 
 async def close_db() -> None:
     """데이터베이스 연결 종료"""
     if async_engine:
         await async_engine.dispose()
-        logger.info("Database connections closed")
+        print("✅ Database connections closed")
     else:
-        logger.info("No database connections to close")
+        print("ℹ️ No database connections to close")

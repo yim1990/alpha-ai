@@ -1,6 +1,6 @@
 """
 구조화된 로깅 설정
-JSON 형식의 로그를 생성하여 관측성을 향상시킵니다.
+개발 환경에서는 사용자 친화적 포맷, 프로덕션에서는 JSON 형식의 로그를 생성합니다.
 """
 
 import logging
@@ -11,6 +11,48 @@ import orjson
 from pythonjsonlogger import jsonlogger
 
 from app.backend.core.config import settings
+
+
+class ColoredFormatter(logging.Formatter):
+    """컬러 포맷터 - 개발 환경용 사용자 친화적 로그"""
+    
+    # ANSI 컬러 코드
+    COLORS = {
+        'DEBUG': '\033[36m',     # 시안
+        'INFO': '\033[32m',      # 녹색  
+        'WARNING': '\033[33m',   # 노란색
+        'ERROR': '\033[31m',     # 빨간색
+        'CRITICAL': '\033[35m',  # 자주색
+        'RESET': '\033[0m'       # 리셋
+    }
+    
+    def format(self, record):
+        # 로그 레벨에 따른 색상 적용
+        color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+        reset = self.COLORS['RESET']
+        
+        # 타임스탬프 (간소화)
+        timestamp = self.formatTime(record, '%H:%M:%S')
+        
+        # 모듈명 간소화
+        module = record.module
+        if len(module) > 12:
+            module = module[:12] + '...'
+            
+        # 이모지 추가
+        emoji_map = {
+            'DEBUG': '🔍',
+            'INFO': '✅' if '✅' in record.getMessage() else ('❌' if '❌' in record.getMessage() else '📋' if '📋' in record.getMessage() else 'ℹ️'),
+            'WARNING': '⚠️',
+            'ERROR': '❌',
+            'CRITICAL': '🚨'
+        }
+        emoji = emoji_map.get(record.levelname, '')
+        
+        # 포맷된 로그 메시지
+        formatted = f"{color}[{timestamp}] {emoji} {record.levelname:<8}{reset} {module:<15} {record.getMessage()}"
+        
+        return formatted
 
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
@@ -69,13 +111,16 @@ def setup_logging(
     console_handler = logging.StreamHandler(sys.stdout)
     
     if log_format == "json":
-        # JSON 포매터 설정
+        # JSON 포매터 설정 (프로덕션)
         formatter = CustomJsonFormatter(
             "%(timestamp)s %(level)s %(name)s %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
+    elif settings.environment == "development":
+        # 개발 환경: 컬러 포매터 설정
+        formatter = ColoredFormatter()
     else:
-        # 텍스트 포매터 설정
+        # 기본 텍스트 포매터 설정
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"

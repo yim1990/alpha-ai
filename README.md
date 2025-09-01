@@ -27,7 +27,6 @@ Alpha AI는 한국투자증권 Open API를 통해 미국 주식을 자동으로 
 - **Next.js 14** (App Router)
 - **TypeScript**
 - **Tailwind CSS** (스타일링)
-- **NextAuth** (인증)
 
 ### Infrastructure
 - **Docker** + **Docker Compose**

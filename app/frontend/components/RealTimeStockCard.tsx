@@ -46,7 +46,10 @@ export default function RealTimeStockCard({ symbol, className = '' }: RealTimeSt
     <div className={`card card-body hover:shadow-md transition-shadow ${className}`}>
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold text-gray-900">{symbol}</h3>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">{symbol}</h3>
+          <p className="text-sm text-gray-600">{(data as any)?.name}</p>
+        </div>
         <div className="flex items-center gap-2">
           {isFetching && <Loader2 className="h-4 w-4 animate-spin text-primary-500" />}
           <Wifi className="h-4 w-4 text-success-500" />
@@ -56,7 +59,7 @@ export default function RealTimeStockCard({ symbol, className = '' }: RealTimeSt
       {/* 현재가 */}
       <div className="mb-2">
         <span className="text-2xl font-bold text-gray-900">
-          {formatPrice((data as any)?.current_price)}
+          {formatPrice((data as any)?.price)}
         </span>
       </div>
 
@@ -70,33 +73,30 @@ export default function RealTimeStockCard({ symbol, className = '' }: RealTimeSt
         <span className={`text-sm font-medium ${changeColor}`}>
           {formatPercent(change)}
         </span>
-        {(data as any)?.previous_close && (data as any)?.current_price && (
-          <span className={`text-sm ${changeColor}`}>
-            ({isPositive ? '+' : ''}
-            {formatPrice((data as any).current_price - (data as any).previous_close)})
-          </span>
-        )}
+        <span className={`text-sm ${changeColor}`}>
+          ({isPositive ? '+' : ''}{formatPrice((data as any)?.change)})
+        </span>
       </div>
 
       {/* 추가 정보 */}
       <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <span className="text-gray-500">전일종가</span>
-          <div className="font-medium">{formatPrice((data as any)?.previous_close)}</div>
-        </div>
         <div>
           <span className="text-gray-500">거래량</span>
           <div className="font-medium">
             {(data as any)?.volume ? (data as any).volume.toLocaleString() : 'N/A'}
           </div>
         </div>
+        <div>
+          <span className="text-gray-500">시가총액</span>
+          <div className="font-medium">{(data as any)?.market_cap || 'N/A'}</div>
+        </div>
       </div>
 
       {/* 마지막 업데이트 시간 */}
-      {(data as any)?.last_updated && (
+      {(data as any)?.timestamp && (
         <div className="mt-3 pt-3 border-t border-gray-100">
           <span className="text-xs text-gray-400">
-            업데이트: {new Date((data as any).last_updated).toLocaleTimeString('ko-KR')}
+            업데이트: {new Date((data as any).timestamp).toLocaleTimeString('ko-KR')}
           </span>
         </div>
       )}

@@ -4,12 +4,15 @@ Access Token 발급 및 갱신을 담당합니다.
 """
 
 import asyncio
+import json
+import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from pydantic import BaseModel, Field
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.backend.core.config import settings
 from app.backend.core.logging import get_logger, log_context
@@ -36,6 +39,25 @@ class AccessToken(BaseModel):
     def authorization_header(self) -> str:
         """Authorization 헤더 값"""
         return f"{self.token_type} {self.access_token}"
+    
+    def to_dict(self) -> dict:
+        """딕셔너리로 변환 (파일 저장용)"""
+        return {
+            "access_token": self.access_token,
+            "token_type": self.token_type,
+            "expires_in": self.expires_in,
+            "expires_at": self.expires_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "AccessToken":
+        """딕셔너리에서 생성 (파일 로드용)"""
+        return cls(
+            access_token=data["access_token"],
+            token_type=data["token_type"],
+            expires_in=data["expires_in"],
+            expires_at=datetime.fromisoformat(data["expires_at"])
+        )
 
 
 class KISAuthService:
@@ -65,6 +87,14 @@ class KISAuthService:
         self._current_token: Optional[AccessToken] = None
         self._token_lock = asyncio.Lock()
         
+        # 토큰 캐시 파일 경로 설정
+        self._cache_dir = Path.home() / ".alpha-ai" / "cache"
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 환경별 캐시 파일 (sandbox/real 구분)
+        env_suffix = "sandbox" if self.use_sandbox else "real"
+        self._token_cache_file = self._cache_dir / f"kis_token_{env_suffix}.json"
+        
         # HTTP 클라이언트
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -74,6 +104,9 @@ class KISAuthService:
                 "User-Agent": "AlphaAI/1.0"
             }
         )
+        
+        # 시작 시 캐시된 토큰 로드
+        self._load_cached_token()
     
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입"""
@@ -87,10 +120,43 @@ class KISAuthService:
         """HTTP 클라이언트 종료"""
         await self._client.aclose()
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
-    )
+    def _load_cached_token(self) -> None:
+        """캐시된 토큰 로드"""
+        try:
+            if self._token_cache_file.exists():
+                with open(self._token_cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                token = AccessToken.from_dict(data)
+                
+                # 토큰이 만료되지 않았으면 사용
+                if not token.is_expired:
+                    self._current_token = token
+                    logger.info("Loaded cached token successfully", extra=log_context(
+                        expires_at=token.expires_at.isoformat(),
+                        cache_file=str(self._token_cache_file)
+                    ))
+                else:
+                    logger.info("Cached token expired, will request new token")
+                    # 만료된 캐시 파일 삭제
+                    self._token_cache_file.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Failed to load cached token: {e}")
+            # 손상된 캐시 파일 삭제
+            self._token_cache_file.unlink(missing_ok=True)
+    
+    def _save_token_to_cache(self, token: AccessToken) -> None:
+        """토큰을 캐시 파일에 저장"""
+        try:
+            with open(self._token_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(token.to_dict(), f, indent=2, ensure_ascii=False)
+            
+            logger.debug("Token saved to cache", extra=log_context(
+                cache_file=str(self._token_cache_file)
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to save token to cache: {e}")
+    
     async def get_access_token(self, force_refresh: bool = False) -> AccessToken:
         """
         Access Token 발급
@@ -146,8 +212,9 @@ class KISAuthService:
                     expires_at=expires_at
                 )
                 
-                # 캐시 업데이트
+                # 캐시 업데이트 (메모리 + 파일)
                 self._current_token = token
+                self._save_token_to_cache(token)
                 
                 logger.info("Access token obtained successfully", extra=log_context(
                     expires_in=expires_in,
@@ -157,10 +224,26 @@ class KISAuthService:
                 return token
                 
             except httpx.HTTPStatusError as e:
+                response_data = {}
+                try:
+                    response_data = e.response.json()
+                except:
+                    pass
+                
+                error_code = response_data.get("error_code", "")
+                error_description = response_data.get("error_description", "")
+                
                 logger.error(f"Token request failed: {e.response.status_code}", extra=log_context(
                     status_code=e.response.status_code,
-                    response_body=e.response.text
+                    response_body=e.response.text,
+                    error_code=error_code
                 ))
+                
+                # KIS API 레이트 리밋 오류 (EGW00133)는 재시도하지 않음
+                if error_code == "EGW00133":
+                    logger.warning("KIS API rate limit exceeded. Please wait before retrying.")
+                    raise ValueError(f"KIS API rate limit: {error_description}")
+                
                 raise
             except Exception as e:
                 logger.error(f"Unexpected error during token request: {e}")

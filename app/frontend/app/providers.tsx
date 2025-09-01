@@ -1,9 +1,10 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SessionProvider } from 'next-auth/react';
+
 import { Toaster } from 'sonner';
 import { useState } from 'react';
+import { AuthProvider } from '@/lib/hooks/useAuth';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   // React Query 클라이언트 생성
@@ -26,8 +27,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <SessionProvider>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
         {children}
         <Toaster 
           position="top-right"
@@ -35,7 +36,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           closeButton
           duration={4000}
         />
-      </QueryClientProvider>
-    </SessionProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }

@@ -1,225 +1,159 @@
 """
 보안 관련 유틸리티
-암호화, 해싱, JWT 토큰 관리 등을 담당합니다.
+비밀번호 해싱, JWT 토큰 생성/검증, 암호화 등을 처리합니다.
 """
 
-import base64
-import os
+import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Union
 
-from cryptography.fernet import Fernet
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import bcrypt
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from app.backend.core.config import settings
-from app.backend.core.logging import get_logger
-
-logger = get_logger(__name__)
-
-# 비밀번호 해싱 컨텍스트
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from .config import settings
 
 
-class EncryptionService:
-    """
-    AES-GCM을 사용한 데이터 암호화 서비스
-    민감한 정보(API 키, 계좌번호 등)를 암호화하여 저장합니다.
-    """
-    
-    def __init__(self, key: Optional[bytes] = None):
-        """
-        Args:
-            key: 32바이트 암호화 키 (None이면 설정에서 로드)
-        """
-        if key is None:
-            key = settings.encryption_key.get_secret_value().encode()[:32]
-        
-        # AES-256-GCM 암호화 객체 생성
-        self.cipher = AESGCM(key)
-    
-    def encrypt(self, plaintext: str) -> str:
-        """
-        문자열을 암호화
-        
-        Args:
-            plaintext: 암호화할 평문
-        
-        Returns:
-            Base64 인코딩된 암호문 (nonce + ciphertext)
-        """
-        try:
-            # 12바이트 nonce 생성
-            nonce = os.urandom(12)
-            
-            # 평문을 바이트로 변환
-            plaintext_bytes = plaintext.encode('utf-8')
-            
-            # 암호화
-            ciphertext = self.cipher.encrypt(nonce, plaintext_bytes, None)
-            
-            # nonce와 암호문을 결합하여 Base64 인코딩
-            encrypted = base64.b64encode(nonce + ciphertext).decode('utf-8')
-            
-            return encrypted
-        except Exception as e:
-            logger.error(f"Encryption failed: {e}")
-            raise
-    
-    def decrypt(self, encrypted: str) -> str:
-        """
-        암호문을 복호화
-        
-        Args:
-            encrypted: Base64 인코딩된 암호문
-        
-        Returns:
-            복호화된 평문
-        """
-        try:
-            # Base64 디코딩
-            encrypted_bytes = base64.b64decode(encrypted.encode('utf-8'))
-            
-            # nonce와 암호문 분리
-            nonce = encrypted_bytes[:12]
-            ciphertext = encrypted_bytes[12:]
-            
-            # 복호화
-            plaintext_bytes = self.cipher.decrypt(nonce, ciphertext, None)
-            
-            return plaintext_bytes.decode('utf-8')
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            raise
-
-
-# 전역 암호화 서비스 인스턴스
-encryption_service = EncryptionService()
-
-
-def hash_password(password: str) -> str:
-    """
-    비밀번호를 해시화
-    
-    Args:
-        password: 평문 비밀번호
-    
-    Returns:
-        해시된 비밀번호
-    """
-    return pwd_context.hash(password)
+# 비밀번호 해싱을 위한 컨텍스트 (bcrypt 호환성 문제 해결)
+pwd_context = CryptContext(
+    schemes=["bcrypt"], 
+    deprecated="auto",
+    bcrypt__rounds=12,  # bcrypt 라운드 설정
+    bcrypt__ident="2b"  # bcrypt 식별자 명시적 설정
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    비밀번호 검증
+    평문 비밀번호와 해시된 비밀번호를 비교합니다.
     
     Args:
         plain_password: 평문 비밀번호
         hashed_password: 해시된 비밀번호
-    
+        
     Returns:
         비밀번호 일치 여부
     """
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(
-    subject: str,
-    expires_delta: Optional[timedelta] = None,
-    additional_claims: Optional[Dict[str, Any]] = None
-) -> str:
+def get_password_hash(password: str) -> str:
     """
-    JWT 액세스 토큰 생성
+    비밀번호를 해시화합니다.
     
     Args:
-        subject: 토큰 주체 (일반적으로 user_id)
-        expires_delta: 만료 시간
-        additional_claims: 추가 클레임
+        password: 평문 비밀번호
+        
+    Returns:
+        해시된 비밀번호
+    """
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None) -> str:
+    """
+    JWT 액세스 토큰을 생성합니다.
     
+    Args:
+        data: 토큰에 포함할 데이터
+        expires_delta: 토큰 만료 시간 (기본: 7일)
+        
     Returns:
         JWT 토큰 문자열
     """
+    to_encode = data.copy()
+    
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.jwt_expiration_minutes
-        )
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expiration_minutes)
     
-    to_encode = {
-        "exp": expire,
-        "sub": str(subject),
-        "iat": datetime.now(timezone.utc),
-        "type": "access"
-    }
-    
-    if additional_claims:
-        to_encode.update(additional_claims)
-    
+    to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
-        to_encode,
-        settings.jwt_secret_key.get_secret_value(),
+        to_encode, 
+        settings.jwt_secret_key.get_secret_value(), 
         algorithm=settings.jwt_algorithm
     )
-    
     return encoded_jwt
 
 
-def decode_token(token: str) -> Dict[str, Any]:
+def verify_token(token: str) -> Union[dict, None]:
     """
-    JWT 토큰 디코딩 및 검증
+    JWT 토큰을 검증하고 페이로드를 반환합니다.
     
     Args:
-        token: JWT 토큰 문자열
-    
+        token: JWT 토큰
+        
     Returns:
-        디코딩된 토큰 페이로드
-    
-    Raises:
-        JWTError: 토큰이 유효하지 않은 경우
+        토큰 페이로드 또는 None (검증 실패 시)
     """
     try:
         payload = jwt.decode(
-            token,
-            settings.jwt_secret_key.get_secret_value(),
+            token, 
+            settings.jwt_secret_key.get_secret_value(), 
             algorithms=[settings.jwt_algorithm]
         )
         return payload
-    except JWTError as e:
-        logger.error(f"Token decode error: {e}")
-        raise
+    except JWTError:
+        return None
+
+
+def generate_reset_token() -> str:
+    """
+    비밀번호 재설정용 랜덤 토큰을 생성합니다.
+    
+    Returns:
+        32바이트 랜덤 토큰 (hex 문자열)
+    """
+    return secrets.token_hex(32)
+
+
+def validate_password_strength(password: str) -> dict[str, Any]:
+    """
+    비밀번호 강도를 검증합니다.
+    
+    Args:
+        password: 검증할 비밀번호
+        
+    Returns:
+        검증 결과 딕셔너리
+    """
+    errors = []
+    
+    # 최소 길이 검사
+    if len(password) < 8:
+        errors.append("비밀번호는 최소 8자 이상이어야 합니다.")
+    
+
+    # 소문자 포함 검사
+    if not any(c.islower() for c in password):
+        errors.append("비밀번호에 소문자가 포함되어야 합니다.")
+    
+    # 숫자 포함 검사
+    if not any(c.isdigit() for c in password):
+        errors.append("비밀번호에 숫자가 포함되어야 합니다.")
+    
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "score": max(0, 3 - len(errors))  # 0-3점 스코어 (대문자/특수문자 검사 제거로 최대값 조정)
+    }
 
 
 def generate_api_key() -> str:
     """
-    랜덤 API 키 생성
+    API 키를 생성합니다.
     
     Returns:
-        32바이트 랜덤 문자열
+        64바이트 랜덤 API 키 (hex 문자열)
     """
-    return base64.urlsafe_b64encode(os.urandom(32)).decode('utf-8').rstrip('=')
+    return secrets.token_hex(64)
 
 
-def mask_sensitive_data(data: str, visible_chars: int = 4) -> str:
-    """
-    민감한 데이터 마스킹
+class TokenData:
+    """JWT 토큰 데이터 클래스"""
     
-    Args:
-        data: 마스킹할 데이터
-        visible_chars: 표시할 문자 수
-    
-    Returns:
-        마스킹된 문자열
-    
-    Example:
-        >>> mask_sensitive_data("1234567890", 4)
-        "1234******"
-    """
-    if not data or len(data) <= visible_chars:
-        return "*" * len(data) if data else ""
-    
-    return data[:visible_chars] + "*" * (len(data) - visible_chars)
+    def __init__(self, user_id: str = None, email: str = None):
+        self.user_id = user_id
+        self.email = email

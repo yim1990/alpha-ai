@@ -81,29 +81,28 @@ export default function KISStatusCard() {
           </div>
           
           <div>
-            <span className="block text-gray-600">일일 API 호출</span>
+            <span className="block text-gray-600">모의투자 모드</span>
             <span className="font-medium text-gray-900">
-              {(data as any).api_calls_today}회
+              {(data as any).sandbox_mode ? '✅ ON' : '❌ OFF'}
             </span>
           </div>
           
-          {(data as any).last_token_time && (
-            <div className="col-span-2">
-              <span className="block text-gray-600">마지막 토큰 발급</span>
-              <span className="font-medium text-gray-900">
-                {new Date((data as any).last_token_time).toLocaleString('ko-KR')}
-              </span>
-            </div>
-          )}
+          <div>
+            <span className="block text-gray-600">API 호출 한도</span>
+            <span className="font-medium text-gray-900">
+              {(data as any).rate_limit?.remaining || 0}/{(data as any).rate_limit?.total || 100}
+            </span>
+          </div>
           
-          {(data as any).error_message && (
-            <div className="col-span-2">
-              <span className="block text-gray-600">오류 메시지</span>
-              <span className="font-medium text-danger-700">
-                {(data as any).error_message}
-              </span>
-            </div>
-          )}
+          <div>
+            <span className="block text-gray-600">마지막 확인</span>
+            <span className="font-medium text-gray-900">
+              {(data as any).last_check ? 
+                new Date((data as any).last_check).toLocaleString('ko-KR') : 
+                'N/A'
+              }
+            </span>
+          </div>
         </div>
       )}
     </div>

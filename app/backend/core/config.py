@@ -3,7 +3,9 @@
 환경 변수를 통해 설정을 로드하고 검증합니다.
 """
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from pydantic import Field, SecretStr, field_validator
@@ -14,7 +16,11 @@ class Settings(BaseSettings):
     """애플리케이션 전역 설정"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # 프로젝트 루트의 .env 파일을 명시적으로 지정
+        env_file=[
+            Path(__file__).parent.parent.parent.parent / ".env",  # 프로젝트 루트
+            ".env",  # 현재 디렉토리
+        ],
         env_ignore_empty=True,
         extra="ignore",
     )
@@ -32,13 +38,31 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     
     # CORS 설정
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    cors_origins: list[str] = ["http://localhost:3000"]
     
-    # Supabase 데이터베이스
-    supabase_db_url: str = Field(..., description="PostgreSQL 연결 URL")
+    # Supabase 데이터베이스 (개별 변수 방식)
+    host: Optional[str] = Field(None, description="Database host")
+    port: Optional[str] = Field("5432", description="Database port") 
+    dbname: Optional[str] = Field("postgres", description="Database name")
+    user: Optional[str] = Field("postgres", description="Database user")
+    password: Optional[SecretStr] = Field(None, description="Database password")
+    
+    # 기존 URL 방식도 지원 (fallback)
+    supabase_db_url: Optional[str] = Field(None, description="PostgreSQL 연결 URL (fallback)")
     supabase_project_url: Optional[str] = None
     supabase_anon_key: Optional[SecretStr] = None
     supabase_service_role_key: Optional[SecretStr] = None
+    
+    @property
+    def database_url(self) -> Optional[str]:
+        """데이터베이스 URL 생성 (개별 변수 우선, URL fallback)"""
+        if self.host and self.password:
+            password_str = self.password.get_secret_value()
+            return f"postgresql+asyncpg://{self.user}:{password_str}@{self.host}:{self.port}/{self.dbname}"
+        elif self.supabase_db_url:
+            # 기존 URL을 asyncpg용으로 변환
+            return self.supabase_db_url.replace("postgresql://", "postgresql+asyncpg://")
+        return None
     
     # Redis 설정
     redis_url: str = "redis://localhost:6379/0"
@@ -118,7 +142,20 @@ def get_settings() -> Settings:
     설정 싱글톤 인스턴스 반환
     @lru_cache를 사용하여 한 번만 로드
     """
-    return Settings()
+    settings_instance = Settings()
+    
+    # 디버그: .env 파일 로딩 상태 확인
+    if settings_instance.environment == "development":
+        env_file_path = Path(__file__).parent.parent.parent.parent / ".env"
+        
+        # 생성된 URL 확인
+        db_url = settings_instance.database_url
+        if db_url:
+            print(f"🔗 생성된 DB URL: {db_url}")
+        else:
+            print("❌ 데이터베이스 URL 생성 실패")
+    
+    return settings_instance
 
 
 # 전역 설정 인스턴스
